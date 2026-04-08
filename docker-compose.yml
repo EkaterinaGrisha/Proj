@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  app:
+    # Замени на путь к твоему образу в GitVerse Registry
+    image: registry.gitverse.ru/[ТВОЙ_ЛОГИН]/[РЕПО]:latest
+    build: .
+    ports:
+      - "8000:8000"
+    restart: always
