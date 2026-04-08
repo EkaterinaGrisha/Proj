@@ -3,6 +3,14 @@ from typing import Tuple
 # Константа точности для сравнения float
 EPS = 1e-9
 
+
+def compute_launch_cost(mass_shuttle: float, fuel_consumption: float) -> float:
+    """
+    Стоимость вывода шаттла на орбиту в единицах топлива.
+    По условию fuel_consumption задает расход на 1 единицу массы.
+    """
+    return mass_shuttle * fuel_consumption
+
 def compute_mass(mass_shuttle: float, fuel_units: float, mass_fuel_unit: float) -> float:
     """Вычисляет полную массу системы. Масса не может быть меньше массы пустого шаттла."""
     safe_fuel = max(0.0, fuel_units)
