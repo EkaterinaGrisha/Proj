@@ -1,148 +1,240 @@
 import math
-from typing import List, Dict, Set, Tuple, Optional
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
-@dataclass
+
+@dataclass(frozen=True)
 class Star:
     name: str
-    coords: Tuple[float, float, float]
-    index: int
+    x: float
+    y: float
+    z: float
 
-def get_dist(s1: Star, s2: Star) -> float:
-    return math.sqrt(sum((a - b) ** 2 for a, b in zip(s1.coords, s2.coords)))
 
-class ConstellationLogic:
-    def __init__(self, stars_data, cluster_params):
-        self.stars = [Star(s.name, (s.x, s.y, s.z), i) for i, s in enumerate(stars_data)]
-        self.min_s = cluster_params.min_size
-        self.max_s = cluster_params.max_size
-        self.max_d = cluster_params.max_neighbor_distance
+def distance(a: Star, b: Star) -> float:
+    dx = a.x - b.x
+    dy = a.y - b.y
+    dz = a.z - b.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
 
-    def find_clusters(self) -> List[List[Star]]:
-        """Поиск компонент связности (кластеров)."""
-        visited = [False] * len(self.stars)
-        clusters = []
 
-        for i in range(len(self.stars)):
-            if not visited[i]:
-                cluster = []
-                queue = [self.stars[i]]
-                visited[i] = True
-                while queue:
-                    curr = queue.pop(0)
-                    cluster.append(curr)
-                    for other in self.stars:
-                        if not visited[other.index]:
-                            if get_dist(curr, other) <= self.max_d:
-                                visited[other.index] = True
-                                queue.append(other)
-                
-                if self.min_s <= len(cluster) <= self.max_s:
-                    clusters.append(cluster)
-        return clusters
+def connected_components(stars: List[Star], max_neighbor_distance: float) -> List[List[int]]:
+    n = len(stars)
+    if n == 0:
+        return []
 
-    def build_mst(self, cluster: List[Star]) -> List[Tuple[int, int, float]]:
-        """Построение MST (Алгоритм Прима)."""
-        n = len(cluster)
-        if n == 0: return []
-        
-        mst_edges = []
-        visited = [False] * n
-        min_dist = [(float('inf'), -1)] * n # (dist, parent_idx_in_cluster)
-        min_dist[0] = (0, -1)
+    adjacency = [[] for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            if distance(stars[i], stars[j]) <= max_neighbor_distance:
+                adjacency[i].append(j)
+                adjacency[j].append(i)
 
-        for _ in range(n):
-            u = -1
-            for i in range(n):
-                if not visited[i] and (u == -1 or min_dist[i][0] < min_dist[u][0]):
-                    u = i
-            
-            visited[u] = True
-            dist_val, parent_in_cluster = min_dist[u]
-            
-            if parent_in_cluster != -1:
-                mst_edges.append((parent_in_cluster, u, dist_val))
+    visited = [False] * n
+    components: List[List[int]] = []
+    for start in range(n):
+        if visited[start]:
+            continue
+        stack = [start]
+        visited[start] = True
+        component = []
+        while stack:
+            node = stack.pop()
+            component.append(node)
+            for neighbor in adjacency[node]:
+                if not visited[neighbor]:
+                    visited[neighbor] = True
+                    stack.append(neighbor)
+        components.append(component)
 
-            for v in range(n):
-                if not visited[v]:
-                    d = get_dist(cluster[u], cluster[v])
-                    if d < min_dist[v][0]:
-                        min_dist[v] = (d, u)
-        
-        return mst_edges
+    return components
 
-    def check_similarity(self, target_edges, candidate_cluster: List[Star], candidate_mst: List[Tuple[int, int, float]]) -> Optional[List[str]]:
-        """Проверка изоморфизма и относительного порядка длин ребер."""
-        from itertools import permutations
 
-        n = len(candidate_cluster)
-        target_nodes_count = len(target_edges) + 1
-        if n != target_nodes_count:
-            return None
+def build_mst(stars: List[Star], component: List[int]) -> List[Tuple[int, int, float]]:
+    size = len(component)
+    if size <= 1:
+        return []
 
-        # Подготовка структуры целевого графа
-        target_adj = {}
-        for e in target_edges:
-            target_adj.setdefault(e.from_node, []).append((e.to, e.distance))
-            target_adj.setdefault(e.to, []).append((e.from_node, e.distance))
+    in_mst = [False] * size
+    min_edge = [float("inf")] * size
+    parent = [-1] * size
+    min_edge[0] = 0.0
+    edges: List[Tuple[int, int, float]] = []
 
-        # Перебор всех возможных сопоставлений (n! - допустимо для n <= 10)
-        # Для n до 50 в реальности нужен AHU алгоритм, но ТЗ намекает на небольшие n в тестах
-        for p in permutations(range(n)):
-            # p[i] = индекс звезды в candidate_cluster, соответствующий вершине i целевого графа
-            is_match = True
-            
-            # 1. Проверяем структуру (изоморфизм MST) и собираем соответствие длин
-            # Мы сравниваем: есть ли в MST кандидата ребро между p[u] и p[v]
-            # и сохраняется ли относительный порядок длин.
-            
-            # Для проверки порядка: соберем пары (целевая_длина, фактическая_длина)
-            length_pairs = []
-            
-            for te in target_edges:
-                u_star = candidate_cluster[p[te.from_node]]
-                v_star = candidate_cluster[p[te.to]]
-                
-                # Ищем это ребро в MST кандидата
-                found_edge = False
-                for c_u, c_v, c_dist in candidate_mst:
-                    s_u, s_v = candidate_cluster[c_u], candidate_cluster[c_v]
-                    if (s_u.index == u_star.index and s_v.index == v_star.index) or \
-                       (s_u.index == v_star.index and s_v.index == u_star.index):
-                        length_pairs.append((te.distance, c_dist))
-                        found_edge = True
+    for _ in range(size):
+        u = -1
+        for i in range(size):
+            if not in_mst[i] and (u == -1 or min_edge[i] < min_edge[u]):
+                u = i
+
+        in_mst[u] = True
+        if parent[u] != -1:
+            left_global = component[parent[u]]
+            right_global = component[u]
+            edges.append((left_global, right_global, min_edge[u]))
+
+        for v in range(size):
+            if in_mst[v]:
+                continue
+            d = distance(stars[component[u]], stars[component[v]])
+            if d < min_edge[v]:
+                min_edge[v] = d
+                parent[v] = u
+
+    return edges
+
+
+def build_tree(n: int, edges: List[Tuple[int, int, float]]) -> Tuple[List[List[int]], Dict[Tuple[int, int], float]]:
+    adjacency = [[] for _ in range(n)]
+    edge_lengths: Dict[Tuple[int, int], float] = {}
+    for u, v, w in edges:
+        adjacency[u].append(v)
+        adjacency[v].append(u)
+        edge_lengths[(u, v)] = w
+        edge_lengths[(v, u)] = w
+    return adjacency, edge_lengths
+
+
+def has_order_conflict(assigned_pairs: List[Tuple[float, float]], new_pair: Tuple[float, float]) -> bool:
+    td_new, cd_new = new_pair
+    for td_old, cd_old in assigned_pairs:
+        if td_old < td_new and not (cd_old < cd_new):
+            return True
+        if td_old > td_new and not (cd_old > cd_new):
+            return True
+    return False
+
+
+def find_mapping(
+    target_adj: List[List[int]],
+    candidate_adj: List[List[int]],
+    target_len: Dict[Tuple[int, int], float],
+    candidate_len: Dict[Tuple[int, int], float],
+) -> Optional[List[int]]:
+    n = len(target_adj)
+    target_order = sorted(range(n), key=lambda x: len(target_adj[x]), reverse=True)
+
+    mapping = [-1] * n
+    used_candidate = [False] * n
+    assigned_edge_pairs: List[Tuple[float, float]] = []
+
+    def select_next_vertex() -> int:
+        best = -1
+        best_domain = 10**9
+        for t in target_order:
+            if mapping[t] != -1:
+                continue
+
+            mapped_neighbors = 0
+            domain_size = 0
+            for c in range(n):
+                if used_candidate[c] or len(candidate_adj[c]) != len(target_adj[t]):
+                    continue
+                ok = True
+                for nt in target_adj[t]:
+                    mc = mapping[nt]
+                    if mc == -1:
+                        continue
+                    mapped_neighbors += 1
+                    if mc not in candidate_adj[c]:
+                        ok = False
                         break
-                
-                if not found_edge:
-                    is_match = False
+                if ok:
+                    domain_size += 1
+
+            if domain_size < best_domain or (domain_size == best_domain and mapped_neighbors > 0):
+                best = t
+                best_domain = domain_size
+        return best
+
+    def dfs(mapped_count: int) -> bool:
+        if mapped_count == n:
+            return True
+
+        t = select_next_vertex()
+        if t == -1:
+            return False
+
+        candidates = [c for c in range(n) if not used_candidate[c] and len(candidate_adj[c]) == len(target_adj[t])]
+        candidates.sort(key=lambda node: len(candidate_adj[node]), reverse=True)
+
+        for c in candidates:
+            ok = True
+            newly_added_pairs: List[Tuple[float, float]] = []
+
+            for nt in target_adj[t]:
+                mc = mapping[nt]
+                if mc == -1:
+                    continue
+                if mc not in candidate_adj[c]:
+                    ok = False
                     break
-            
-            if is_match:
-                # 2. Проверка относительного порядка длин
-                # "Относительный порядок сохраняется" означает:
-                # Если L1 < L2 в целевом, то L1' < L2' в найденном.
-                length_pairs.sort() # Сортируем по целевым длинам
-                actual_lengths = [pair[1] for pair in length_pairs]
-                
-                # Проверяем, что список фактических длин тоже строго возрастает
-                if all(actual_lengths[i] < actual_lengths[i+1] for i in range(len(actual_lengths)-1)):
-                    return [candidate_cluster[p[i]].name for i in range(n)]
-                    
-        return None
+                pair = (target_len[(t, nt)], candidate_len[(c, mc)])
+                if has_order_conflict(assigned_edge_pairs, pair) or has_order_conflict(newly_added_pairs, pair):
+                    ok = False
+                    break
+                newly_added_pairs.append(pair)
+
+            if not ok:
+                continue
+
+            mapping[t] = c
+            used_candidate[c] = True
+            assigned_edge_pairs.extend(newly_added_pairs)
+
+            if dfs(mapped_count + 1):
+                return True
+
+            for _ in newly_added_pairs:
+                assigned_edge_pairs.pop()
+            mapping[t] = -1
+            used_candidate[c] = False
+
+        return False
+
+    if dfs(0):
+        return mapping
+    return None
+
 
 def solve_task_3(request_data) -> dict:
-    logic = ConstellationLogic(request_data.stars, request_data.cluster_params)
-    clusters = logic.find_clusters()
-    
-    matches = []
-    target_edges = request_data.target_constellation.edges
-    
-    for cluster in clusters:
-        mst = logic.build_mst(cluster)
-        match = logic.check_similarity(target_edges, cluster, mst)
-        if match:
-            matches.append(match)
-            
+    stars = [Star(name=s.name, x=s.x, y=s.y, z=s.z) for s in request_data.stars]
+    components = connected_components(stars, request_data.cluster_params.max_neighbor_distance)
+
+    target_n = len(request_data.target_constellation.edges) + 1
+    target_edges = [
+        (edge.from_node, edge.to, edge.distance)
+        for edge in request_data.target_constellation.edges
+    ]
+    target_adj, target_lengths = build_tree(target_n, target_edges)
+
+    matches: List[List[str]] = []
+
+    for component in components:
+        if not (request_data.cluster_params.min_size <= len(component) <= request_data.cluster_params.max_size):
+            continue
+        if len(component) != target_n:
+            continue
+
+        mst_edges_global = build_mst(stars, component)
+
+        local_index = {global_idx: i for i, global_idx in enumerate(component)}
+        mst_edges_local = [
+            (local_index[u], local_index[v], w)
+            for u, v, w in mst_edges_global
+        ]
+
+        candidate_adj, candidate_lengths = build_tree(target_n, mst_edges_local)
+        mapping = find_mapping(target_adj, candidate_adj, target_lengths, candidate_lengths)
+        if mapping is None:
+            continue
+
+        matched_names = [stars[component[mapping[i]]].name for i in range(target_n)]
+        matches.append(matched_names)
+
+        if len(matches) > 1:
+            return {"found": False}
+
     if len(matches) == 1:
         return {"found": True, "matched_stars": matches[0]}
     return {"found": False}
